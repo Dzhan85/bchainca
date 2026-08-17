@@ -1,0 +1,51 @@
+<div class="well" *ngIf="data.header">
+  <dl class="horizontal">
+    <dt>Family</dt>
+    <dd>{{ data.header.family_name }}, v{{ data.header.family_version }}</dd>
+
+    <dt>Signer Public Key</dt>
+    <dd>{{ data.header.signer_public_key || '-' }}</dd>
+
+    <dt>Batcher Public Key</dt>
+    <dd>{{ data.header.batcher_public_key || '-' }}</dd>
+
+    <dt>Nonce</dt>
+    <dd>{{ data.header.nonce || '-' }}</dd>
+  </dl>
+</div>
+
+<hr/>
+
+<div class="row" *ngIf="data.header && (data.header.inputs || data.header.outputs)">
+  <div class="six columns">
+    <h3 class="h3">Inputs</h3>
+    <ul class="input-output-list">
+      <li *ngFor="let input of data.header.inputs" class="ellipsis">
+        <a routerLink="/state-monitor">{{ input }}</a>
+      </li>
+    </ul>
+  </div>
+  <div class="six columns">
+    <h3 class="h3">Outputs</h3>
+    <ul class="input-output-list">
+      <li *ngFor="let output of data.header.outputs" class="ellipsis">
+        <a routerLink="/state-monitor">{{ output }}</a>
+      </li>
+    </ul>
+  </div>
+</div>
+
+<ng-container *ngIf="data.header?.dependencies?.length">
+  <hr/>
+  <h3 class="h3">Dependencies</h3>
+  <ul class="dependencies-list">
+    <li *ngFor="let dependency of data.header.dependencies" class="ellipsis">
+      <a [routerLink]="'/transactions/' + dependency">{{ dependency }}</a>
+    </li>
+  </ul>
+</ng-container>
+
+<hr/>
+
+<h3 class="h3">Payload</h3>
+<pre class="code-viewer">{{ payloadJSON }}</pre>

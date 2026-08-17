@@ -1,0 +1,74 @@
+<section class="explorer">
+  <table class="content">
+    <tr>
+      <td class="left-column">
+        <section class="view-select">
+          <mat-select placeholder="Explore all" [(ngModel)]="viewType" (selectionChange)="onChangeViewType(viewType)" name="view">
+            <mat-option *ngFor="let view of views" [value]="view">{{ view }}</mat-option>
+          </mat-select>
+        </section>
+
+        <section>
+          <ng-container *ngIf="loading">
+            <div class="loader"></div>
+          </ng-container>
+
+          <section class="view-select">
+            <mat-select [(ngModel)]="navPageSize" name="size" (selectionChange)="updateNavPaging({pageSize: navPageSize, pageIndex: 0})">
+              <mat-option *ngFor="let size of navPageSizeOptions" [value]="size">{{ size }} per page</mat-option>
+            </mat-select>
+          </section>
+
+          <ng-container *ngIf="!loading">
+            <ng-container *ngIf="items && items.length">
+              <dynamic-view-loader class="item"
+                [ngClass]="{'active': item === selectedItem}"
+                *ngFor="let item of items"
+                [component]="listViewComponent"
+                [data]="item"
+                (click)="showItemDetails(item)">
+              </dynamic-view-loader>
+            </ng-container>
+            <ng-container *ngIf="!items || !items.length">
+              <p class="no-results">No {{ viewType }} to display.</p>
+            </ng-container>
+            <ng-container *ngIf="nextPosition">
+              <div class="list-item">
+                <button mat-button class="mat-raised-button full-width" (click)="nextPage()">Load Next {{navPageSize}}</button>
+              </div>
+            </ng-container>
+          </ng-container>
+        </section>
+      </td>
+
+      <td class="right-column mat-elevation-z2">
+        <ng-container *ngIf="loading">
+          <div class="loader"></div>
+        </ng-container>
+
+        <ng-container *ngIf="!loading">
+          <div class="detail" *ngIf="selectedItem">
+            <ng-container *ngIf="viewType === 'transactions'">
+              <h2 class="h2 with-subheader">Transaction Detail</h2>
+              <p class="id">ID: <a [routerLink]="'/transactions/' + selectedItem.header_signature">{{ selectedItem.header_signature }}</a></p>
+              <transaction [data]="selectedItem"></transaction>
+            </ng-container>
+            <ng-container *ngIf="viewType === 'blocks'">
+              <h2 class="h2 with-subheader">Block Detail</h2>
+              <p class="id">ID: <a [routerLink]="'/blocks/' + selectedItem.header_signature">{{ selectedItem.header_signature }}</a></p>
+              <block [data]="selectedItem"></block>
+            </ng-container>
+            <ng-container *ngIf="viewType === 'batches'">
+              <h2 class="h2 with-subheader">Batch Detail</h2>
+              <p class="id">ID: <a [routerLink]="'/batches/' + selectedItem.header_signature">{{ selectedItem.header_signature }}</a></p>
+              <batch [data]="selectedItem"></batch>
+            </ng-container>
+          </div>
+          <div class="detail" *ngIf="!selectedItem">
+            <p class="no-item-selected">No item selected.</p>
+          </div>
+        </ng-container>
+      </td>
+    </tr>
+  </table>
+</section>

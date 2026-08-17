@@ -15,14 +15,12 @@
  * ------------------------------------------------------------------------------
  */
 
-@import '../styles/theme';
-
 .se-navbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   padding: 8px 16px;
-  color: mat-color($se-accent, 500);
+  color: #54b7df;
   background: #ffffff;
   text-transform: uppercase;
   border-bottom: 1px solid rgba(0, 0, 0, 0.1);
