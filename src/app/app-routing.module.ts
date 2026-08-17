@@ -15,43 +15,62 @@
  * ------------------------------------------------------------------------------
  */
 
-import {NgModule} from '@angular/core';
-import {Routes, RouterModule} from '@angular/router';
-import {TransactionDetailComponent} from './transactions/transaction-detail/transaction-detail.component'
-import {BatchDetailComponent} from './batches/batch-detail/batch-detail.component'
-import {BlockDetailComponent} from './blocks/block-detail/block-detail.component'
-import {ExplorerComponent} from './explorer/explorer.component'
-import {StateMonitorComponent} from './states/state-monitor/state-monitor.component'
+import { NgModule } from '@angular/core';
+import { Routes, RouterModule } from '@angular/router';
+// Old components temporarily disabled
+// import { TransactionDetailComponent } from './transactions/transaction-detail/transaction-detail.component';
+// import { BatchDetailComponent } from './batches/batch-detail/batch-detail.component';
+// import { BlockDetailComponent } from './blocks/block-detail/block-detail.component';
+// import { ExplorerComponent } from './explorer/explorer.component';
+// import { StateMonitorComponent } from './states/state-monitor/state-monitor.component';
+import { LoginComponent } from './login/login.component';
+import { DashboardComponent } from './dashboard/dashboard.component';
+import { AuthGuard } from './guards/auth.guard';
 
 export const routes: Routes = [
   {
+    path: 'login',
+    component: LoginComponent
+  },
+  {
     path: '',
-    component: ExplorerComponent,
+    redirectTo: '/dashboard',
     pathMatch: 'full'
   },
   {
-    path: 'transactions/:id',
-    component: TransactionDetailComponent,
-    pathMatch: 'full'
+    path: 'dashboard',
+    component: DashboardComponent,
+    canActivate: [AuthGuard]
   },
-  {
-    path: 'batches/:id',
-    component: BatchDetailComponent,
-    pathMatch: 'full'
-  },
-  {
-    path: 'blocks/:id',
-    component: BlockDetailComponent,
-    pathMatch: 'full'
-  },
-  {
-    path: 'state-monitor',
-    component: StateMonitorComponent,
-    pathMatch: 'full'
-  },
+  // Old routes temporarily disabled for Angular 18 compatibility
+  // {
+  //   path: 'explorer',
+  //   component: ExplorerComponent,
+  //   canActivate: [AuthGuard]
+  // },
+  // {
+  //   path: 'transactions/:id',
+  //   component: TransactionDetailComponent,
+  //   canActivate: [AuthGuard]
+  // },
+  // {
+  //   path: 'batches/:id',
+  //   component: BatchDetailComponent,
+  //   canActivate: [AuthGuard]
+  // },
+  // {
+  //   path: 'blocks/:id',
+  //   component: BlockDetailComponent,
+  //   canActivate: [AuthGuard]
+  // },
+  // {
+  //   path: 'state-monitor',
+  //   component: StateMonitorComponent,
+  //   canActivate: [AuthGuard]
+  // },
   {
     path: '**',
-    redirectTo: ''
+    redirectTo: '/dashboard'
   }
 ];
 

@@ -1,6 +1,6 @@
 import datetime
 import hashlib
-import pickle
+import json
 import logging
 
 from sawtooth_sdk.processor.exceptions import InternalError
@@ -8,12 +8,40 @@ from certgen import *
 
 LOGGER = logging.getLogger(__name__)
 
+# WARNING: Using JSON instead of pickle for security
+# Pickle can execute arbitrary code and is unsafe for untrusted data
 def _serialize(obj):
-    return pickle.dumps(obj)
+    """Serialize Certificate object to JSON bytes (secure alternative to pickle)."""
+    if isinstance(obj, Certificate):
+        data = {
+            'state': obj.state,
+            'valid_till_timestamp': obj.valid_till_timestamp,
+            'revoke_timestamp': obj.revoke_timestamp,
+            'serial_number': str(obj.serial_number),
+            'certificate_string': obj.certificate_string,
+            'subject_name': str(obj.subject_name)
+        }
+        return json.dumps(data).encode('utf-8')
+    raise TypeError(f"Cannot serialize object of type {type(obj)}")
 
 
 def _deserialize(data):
-    return pickle.loads(data)
+    """Deserialize JSON bytes to Certificate object (secure alternative to pickle)."""
+    if data is None:
+        return None
+    try:
+        obj_dict = json.loads(data.decode('utf-8'))
+        return Certificate(
+            state=obj_dict['state'],
+            valid_till_timestamp=obj_dict['valid_till_timestamp'],
+            revoke_timestamp=obj_dict['revoke_timestamp'],
+            serial_number=int(obj_dict['serial_number']),
+            certificate_string=obj_dict['certificate_string'],
+            subject_name=obj_dict['subject_name']
+        )
+    except (json.JSONDecodeError, KeyError, ValueError) as e:
+        LOGGER.error(f"Failed to deserialize certificate data: {e}")
+        raise InternalError(f"Invalid certificate data: {e}")
 
 
 class Certificate:

@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import subprocess
 import sys
 
 from lib.common import init_logger, TEMPLATE_NODE_ID, TEMPLATE_NODE_NETWORK_NAME
@@ -28,8 +29,19 @@ def _generate_docker_compose(node_template, i):
 
 
 def _docker_up(docker_file):
+    """Start docker-compose with proper command injection protection."""
     LOGGER.info('Starting the node {}'.format(docker_file))
-    os.system('docker-compose -f {} up -d --build'.format(docker_file))
+    try:
+        # Use subprocess with list of arguments to prevent command injection
+        subprocess.run(
+            ['docker-compose', '-f', docker_file, 'up', '-d', '--build'],
+            check=True,
+            capture_output=True,
+            text=True
+        )
+    except subprocess.CalledProcessError as e:
+        LOGGER.error('Failed to start docker-compose: {}'.format(e.stderr))
+        raise
 
 
 class DockerStarter:

@@ -26,6 +26,11 @@
   background: #ffffff;
   text-transform: uppercase;
   border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  height: 64px;
 
   > .mat-button {
     &:last-child {
@@ -56,4 +61,60 @@
 
 .se-button.lg {
   font-size: 24px;
+}
+
+.se-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  mat-icon {
+    font-size: 20px;
+    width: 20px;
+    height: 20px;
+  }
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #f5f7fa;
+  margin-left: 16px;
+
+  .user-icon {
+    color: #667eea;
+    font-size: 32px;
+    width: 32px;
+    height: 32px;
+  }
+
+  .user-details {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+
+    .user-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: #333;
+      line-height: 1;
+      text-transform: none;
+    }
+
+    .user-role {
+      font-size: 12px;
+      color: #666;
+      line-height: 1;
+      text-transform: none;
+    }
+  }
+
+  button {
+    mat-icon {
+      color: #666;
+    }
+  }
 }

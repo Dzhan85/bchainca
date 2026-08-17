@@ -13,8 +13,14 @@
 # limitations under the License.
 # ------------------------------------------------------------------------------
 
-FROM node:6-onbuild
+FROM node:20-alpine
 
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Configure npm proxy if needed
 RUN \
  if [ ! -z $HTTP_PROXY ] && [ -z $http_proxy ]; then \
   http_proxy=$HTTP_PROXY; \
@@ -29,6 +35,18 @@ RUN \
   npm config set https-proxy $https_proxy; \
  fi;
 
+# Install dependencies
+RUN npm ci
+
+# Copy application files
+COPY . .
+
+# Build the application
 RUN npm run build
 
+# Move dist to parent directory
 RUN mv dist ../
+
+EXPOSE 4200
+
+CMD ["npm", "start"]

@@ -20,13 +20,10 @@ import * as _ from 'lodash';
 import { environment } from '../../../environments/environment';
 
 import { Injectable } from '@angular/core';
-import { Http } from '@angular/http';
+import { HttpClient } from '@angular/common/http';
 
-import { Observable } from 'rxjs/Observable';
-import 'rxjs/add/operator/map';
-import 'rxjs/add/observable/throw';
-import 'rxjs/add/operator/catch';
-import 'rxjs/add/operator/timeout';
+import { Observable, throwError } from 'rxjs';
+import { map, catchError, timeout } from 'rxjs/operators';
 
 /**
  * Service to assist in retrieving data from a RESTful API.
@@ -47,15 +44,28 @@ export class APIService {
   apiTimeout = 10000;
 
   /**
-   * @param http {Http} - service for making HTTP requests
+   * @param http {HttpClient} - service for making HTTP requests
    */
-  constructor(public http: Http) {
+  constructor(public http: HttpClient) {
     // set url from environment variables
     this.apiURL = environment.apiURL;
 
     // if API timeout specified, update
     if (environment.apiTimeout)
       this.apiTimeout = environment.apiTimeout;
+  }
+
+  /**
+   * Simple GET request to API
+   * @param endpoint {string} - API endpoint to call
+   * @return {Observable} - observable watching the results of the API request
+   */
+  get(endpoint: string): Observable<any> {
+    return this.http.get(`${this.apiURL}/${endpoint}`)
+      .pipe(
+        timeout(this.apiTimeout),
+        catchError(err => throwError(() => err))
+      );
   }
 
   /**
@@ -69,8 +79,8 @@ export class APIService {
    * @param params.pageIndex {number} - offset for items from API
    * @return {Observable} - observable watching the results of the API request
    */
-  getItems(resourceName: string, params?: object): Observable<object[]> {
-    let options: object = _.defaults(params, this.pagingDefaults);
+  getItems(resourceName: string, params?: any): Observable<any[]> {
+    let options: any = _.defaults(params, this.pagingDefaults);
     let url = this.apiURL + '/' + resourceName + '?limit=' + options['pageSize'];
     if (params && params['head']) {
       url += '&head=' + params['head'];
@@ -79,10 +89,11 @@ export class APIService {
       url += '&start=' + params['start'];
     }
 
-    return this.http.get(url)
-      .timeout(this.apiTimeout)
-      .map(response => response.json() as object[])
-      .catch(err => Observable.throw(err));
+    return this.http.get<any>(url)
+      .pipe(
+        timeout(this.apiTimeout),
+        catchError(err => throwError(() => err))
+      );
   }
 
   /**
@@ -92,11 +103,13 @@ export class APIService {
    * @param id {string} - unique identifier for retrieving the item from the API
    * @return {Observable} - observable watching the results of the API request
    */
-  getItemByID(resourceName: string, id: string): Observable<object> {
-    return this.http.get(this.apiURL + '/' + resourceName + '/' + id)
-      .timeout(this.apiTimeout)
-      .map(response => response.json().data as object)
-      .catch(err => Observable.throw(err));
+  getItemByID(resourceName: string, id: string): Observable<any> {
+    return this.http.get(`${this.apiURL}/${resourceName}/${id}`)
+      .pipe(
+        timeout(this.apiTimeout),
+        map((response: any) => response.data),
+        catchError(err => throwError(() => err))
+      );
   }
 
 }

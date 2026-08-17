@@ -14,18 +14,51 @@
   limitations under the License.
 -->
 
-<nav class="se-navbar">
+<nav class="se-navbar" *ngIf="!isLoginPage && isAuthenticated">
   <a mat-button
      class="se-button lg lowercase"
      routerLink="/"
-     aria-label="Sawtooth">
+     aria-label="BChainCA">
     <img class="se-dokchain-logo"
          src="../../../assets/images/sawtooth-nav-logo-sm.png"
-         alt="Sawtooth">
+         alt="BChainCA">
   </a>
-  <a mat-button class="se-button" routerLink="">Explorer</a>
-  <a mat-button class="se-button" routerLink="state-monitor">State Monitor</a>
+  <a mat-button class="se-button" routerLink="/dashboard">
+    <mat-icon>dashboard</mat-icon>
+    Dashboard
+  </a>
+  <!-- Old routes temporarily disabled -->
+  <!-- <a mat-button class="se-button" routerLink="/explorer">
+    <mat-icon>explore</mat-icon>
+    Explorer
+  </a>
+  <a mat-button class="se-button" routerLink="/state-monitor">
+    <mat-icon>monitor</mat-icon>
+    State Monitor
+  </a> -->
   <div class="flex-spacer"></div>
+
+  <div class="user-info" *ngIf="currentUser">
+    <mat-icon class="user-icon">account_circle</mat-icon>
+    <div class="user-details">
+      <span class="user-name">{{ currentUser.username }}</span>
+      <span class="user-role">{{ currentUser.role }}</span>
+    </div>
+    <button mat-icon-button [matMenuTriggerFor]="userMenu" aria-label="User menu">
+      <mat-icon>more_vert</mat-icon>
+    </button>
+    <mat-menu #userMenu="matMenu">
+      <button mat-menu-item disabled>
+        <mat-icon>person</mat-icon>
+        <span>{{ currentUser.email }}</span>
+      </button>
+      <mat-divider></mat-divider>
+      <button mat-menu-item (click)="logout()">
+        <mat-icon>exit_to_app</mat-icon>
+        <span>Logout</span>
+      </button>
+    </mat-menu>
+  </div>
 </nav>
 
 <ng-container class="loading" *ngIf="loading">

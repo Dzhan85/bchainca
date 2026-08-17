@@ -17,30 +17,52 @@
 
 import { Component, OnInit } from '@angular/core';
 import { Router, NavigationStart, NavigationCancel, NavigationEnd, NavigationError } from '@angular/router';
+import { AuthService, User } from './services/auth.service';
 
 @Component({
   selector: 'app-root',
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.scss']
 })
-export class AppComponent {
-
-  constructor(private router: Router) { }
-
+export class AppComponent implements OnInit {
   loading = true;
+  currentUser: User | null = null;
+  isLoginPage = false;
+
+  constructor(
+    private router: Router,
+    private authService: AuthService
+  ) {
+    this.authService.currentUser.subscribe(user => {
+      this.currentUser = user;
+    });
+
+    this.router.events.subscribe(() => {
+      this.isLoginPage = this.router.url === '/login';
+    });
+  }
 
   ngOnInit() {
     // scroll to top of page on route change
     this.router.events.subscribe((event) => {
-      if (!(event instanceof NavigationEnd)) return;
-
-      window.scrollTo(0, 0);
-
+      if (event instanceof NavigationEnd) {
+        window.scrollTo(0, 0);
+      }
       this.loadingInterceptor(event);
     });
+
+    this.loading = false;
   }
 
-  loadingInterceptor(event): void {
+  loadingInterceptor(event: any): void {
     this.loading = event instanceof NavigationStart;
+  }
+
+  logout(): void {
+    this.authService.logout();
+  }
+
+  get isAuthenticated(): boolean {
+    return this.authService.isAuthenticated;
   }
 }
