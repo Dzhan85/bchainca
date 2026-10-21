@@ -4,14 +4,13 @@ import datetime
 import logging
 import sys
 import time
-from os import path
 
 from sawtooth_sdk.messaging.stream import Stream
 from sawtooth_sdk.protobuf.client_event_pb2 import ClientEventsSubscribeRequest, ClientEventsSubscribeResponse
 from sawtooth_sdk.protobuf.events_pb2 import EventSubscription, EventList
 from sawtooth_sdk.protobuf.validator_pb2 import Message
 
-from lib.common import init_logger, EVENT_SUFFIX, DEFAULT_MONITORING_FOLDER, SubscriberError
+from lib.common import init_logger, EVENT_SUFFIX, SubscriberError, monitoring_file_path
 
 LOGGER = logging.getLogger(__name__)
 
@@ -29,7 +28,7 @@ class SawtoothSubscriber:
         date = datetime.date.today()
         logging_file_name = '{}-{}-benchmark-events.csv'.format(str(date), benchmark)
 
-        self._event_log_file = path.join(DEFAULT_MONITORING_FOLDER, logging_file_name)
+        self._event_log_file = monitoring_file_path(logging_file_name)
 
     def subscribe_to_event(self):
 

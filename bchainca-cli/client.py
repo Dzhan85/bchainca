@@ -1,11 +1,12 @@
-import hashlib
 import base64
-from base64 import b64encode
+import datetime
+import hashlib
+import json
+import secrets
 import time
-import random
+from base64 import b64encode
+
 import requests
-import yaml
-import zmq
 
 from sawtooth_signing import create_context
 from sawtooth_signing import CryptoFactory
@@ -17,27 +18,58 @@ from sawtooth_sdk.protobuf.transaction_pb2 import Transaction
 from sawtooth_sdk.protobuf.batch_pb2 import BatchList
 from sawtooth_sdk.protobuf.batch_pb2 import BatchHeader
 from sawtooth_sdk.protobuf.batch_pb2 import Batch
-from sawtooth_sdk.protobuf.client_event_pb2 import ClientEventsSubscribeRequest, ClientEventsSubscribeResponse, \
-    ClientEventsUnsubscribeRequest, ClientEventsUnsubscribeResponse
-from sawtooth_sdk.protobuf.events_pb2 import EventSubscription, EventList
-from sawtooth_sdk.protobuf.validator_pb2 import Message
 
-from sawtooth_xo.xo_exceptions import XoException
-import datetime
+from CaException import CaException
+
+FAMILY_NAME = 'CA'
+FAMILY_VERSION = '1.0'
+NAMESPACE = 'ca_1'
+
+# Must match CA_KEY_PASSPHRASE in docker/bchainca-tp/bchainca/CaState.py.
+CA_KEY_PASSPHRASE = b'passw'
+
+CA_ROOT_ENTITY = 'CA_Root'
+CA_ADMIN_ENTITY = 'CA_Admin'
+
+# Seconds added on top of the commit wait for the HTTP request itself.
+HTTP_TIMEOUT_MARGIN = 10
 
 
 def _sha512(data):
     return hashlib.sha512(data).hexdigest()
 
 
-def write_to_file(file_name:str, data: bytes):
-    with open(file_name, "wb") as f:
-        f.write(data)
+def get_prefix():
+    return _sha512(NAMESPACE.encode('utf-8'))[:6]
+
+
+def get_address(entity):
+    """State address of a CA entity (certificate serial, 'CA_Root', ...)."""
+    return get_prefix() + _sha512(str(entity).encode('utf-8'))[:64]
+
+
+def make_payload(action, value, date=None):
+    """Serialization is a '|' delimited utf-8 string: action|date|value."""
+    if date is None:
+        # Naive UTC, as expected by the transaction processor.
+        date = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+    return "|".join([action, date.isoformat(), str(value)]).encode('utf-8')
+
+
+def new_serial():
+    """Random, positive 63-bit number used as transaction nonce.
+
+    The transaction processor uses the nonce as the certificate serial
+    number, so knowing it up front lets us find the certificate in state.
+    """
+    return secrets.randbelow(2 ** 63 - 1) + 1
+
 
 class CaClient:
     def __init__(self, base_url, keyfile=None):
 
-        self._base_url = base_url
+        self._base_url = base_url if '://' in base_url else 'http://' + base_url
+        self._base_url = self._base_url.rstrip('/')
 
         if keyfile is None:
             self._signer = None
@@ -47,28 +79,27 @@ class CaClient:
             with open(keyfile) as fd:
                 private_key_str = fd.read().strip()
         except OSError as err:
-            raise XoException(
+            raise CaException(
                 'Failed to read private key {}: {}'.format(
                     keyfile, str(err)))
 
         try:
             private_key = Secp256k1PrivateKey.from_hex(private_key_str)
         except ParseError as e:
-            raise XoException(
+            raise CaException(
                 'Unable to load private key: {}'.format(str(e)))
 
         self._signer = CryptoFactory(create_context('secp256k1')) \
             .new_signer(private_key)
 
-    def create(self, csr, wait=None, auth_user=None, auth_password=None):
-        return self._send_ca_txn(
-            "create",
-            value=csr,
-            wait=wait,
-            auth_user=auth_user,
-            auth_password=auth_password)
+    @property
+    def public_key(self):
+        return self._signer.get_public_key().as_hex() if self._signer else None
+
+    # Transactions
 
     def init(self, pkey, wait=None, auth_user=None, auth_password=None):
+        """Initialize the CA with a CA_KEY_PASSPHRASE encrypted PEM key."""
         return self._send_ca_txn(
             "init",
             value=pkey,
@@ -76,30 +107,20 @@ class CaClient:
             auth_user=auth_user,
             auth_password=auth_password)
 
-    def simple(self, data, wait=None, auth_user=None, auth_password=None):
-        return self._send_simple_txn(
-            value=data,
-            wait=wait,
-            auth_user=auth_user,
-            auth_password=auth_password)
+    def create(self, csr, wait=None, auth_user=None, auth_password=None):
+        """Request a certificate for a PEM encoded CSR.
 
-    def get(self, serial: str, wait=None, auth_user=None, auth_password=None):
+        Returns:
+            (serial, status): serial of the new certificate and the batch status.
+        """
         return self._send_ca_txn(
-            "get",
-            value=serial,
+            "create",
+            value=csr,
             wait=wait,
             auth_user=auth_user,
             auth_password=auth_password)
 
-    def status(self, serial: str, wait=None, auth_user=None, auth_password=None):
-        return self._send_ca_txn(
-            "status",
-            value=serial,
-            wait=wait,
-            auth_user=auth_user,
-            auth_password=auth_password)
-
-    def revoke(self, serial: str, wait=None, auth_user=None, auth_password=None):
+    def revoke(self, serial, wait=None, auth_user=None, auth_password=None):
         return self._send_ca_txn(
             "revoke",
             value=serial,
@@ -107,40 +128,85 @@ class CaClient:
             auth_user=auth_user,
             auth_password=auth_password)
 
+    def simple(self, data, wait=None, auth_user=None, auth_password=None):
+        address = get_simple_address('Simple Data Value 1')
+        transaction = self._create_transaction(
+            'SIMPLE', str(data).encode(), address, nonce=new_serial())
+        return self._submit([transaction], wait, auth_user, auth_password)
+
+    # Read-only queries against global state (no transaction needed)
+
+    def get_record(self, serial, auth_user=None, auth_password=None):
+        """Certificate record stored by the transaction processor, or None."""
+        data = self._get_state(get_address(serial), auth_user, auth_password)
+        return json.loads(data.decode('utf-8')) if data is not None else None
+
+    def list_records(self, auth_user=None, auth_password=None):
+        """All certificate records in the CA namespace, sorted by serial."""
+        records = []
+        for entry in self._list_state(get_prefix(), auth_user, auth_password):
+            try:
+                record = json.loads(base64.b64decode(entry['data']).decode('utf-8'))
+            except ValueError:
+                continue  # CA root certificate / key entries are PEM, not JSON
+            if isinstance(record, dict) and 'serial_number' in record:
+                records.append(record)
+        return sorted(records, key=lambda r: int(r['serial_number']))
+
+    def get_ca_certificate(self, auth_user=None, auth_password=None):
+        """PEM encoded CA root certificate, or None if the CA is not initialized."""
+        return self._get_state(get_address(CA_ROOT_ENTITY), auth_user, auth_password)
+
+    def get_ca_admin(self, auth_user=None, auth_password=None):
+        data = self._get_state(get_address(CA_ADMIN_ENTITY), auth_user, auth_password)
+        return data.decode('utf-8') if data is not None else None
+
+    # Internals
+
+    def _get_state(self, address, auth_user=None, auth_password=None):
+        result = self._send_request(
+            'state/{}'.format(address),
+            auth_user=auth_user,
+            auth_password=auth_password,
+            not_found_ok=True)
+        if result is None:
+            return None
+        return base64.b64decode(result.json()['data'])
+
+    def _list_state(self, prefix, auth_user=None, auth_password=None):
+        url = 'state?address={}'.format(prefix)
+        while url:
+            result = self._send_request(url, auth_user=auth_user, auth_password=auth_password,
+                                        not_found_ok=True)
+            if result is None:
+                return
+            body = result.json()
+            yield from body.get('data', [])
+            url = body.get('paging', {}).get('next')
+
     def _get_status(self, batch_id, wait, auth_user=None, auth_password=None):
+        result = self._send_request(
+            'batch_statuses?id={}&wait={}'.format(batch_id, wait),
+            auth_user=auth_user,
+            auth_password=auth_password,
+            timeout=wait + HTTP_TIMEOUT_MARGIN)
         try:
-            result = self._send_request(
-                'batch_statuses?id={}&wait={}'.format(batch_id, wait),
-                auth_user=auth_user,
-                auth_password=auth_password)
-            return yaml.safe_load(result)['data'][0]['status']
-        except BaseException as err:
-            raise XoException(err)
-
-    def _get_prefix(self):
-        return _sha512('ca_1'.encode('utf-8'))[:6]
-
-    def _get_address(self, name):
-        xo_prefix = self._get_prefix()
-        game_address = _sha512(name.encode('utf-8'))[:64]
-        return xo_prefix + game_address
-
-    def _get_simple_address(self, data):
-        prefix = hashlib.sha512('simple'.encode('utf-8')).hexdigest()[:6]
-        address = hashlib.sha512(data.encode('utf-8')).hexdigest()[:64]
-        return prefix + address
+            return result.json()['data'][0]
+        except (ValueError, KeyError, IndexError) as err:
+            raise CaException('Unexpected batch status response: {}'.format(err))
 
     def _send_request(self,
                       suffix,
                       data=None,
                       content_type=None,
-                      name=None,
                       auth_user=None,
-                      auth_password=None):
-        if self._base_url.startswith("http://"):
-            url = "{}/{}".format(self._base_url, suffix)
+                      auth_password=None,
+                      not_found_ok=False,
+                      timeout=HTTP_TIMEOUT_MARGIN * 3):
+        if '://' in suffix:  # absolute URL, e.g. from REST API paging links
+            url = suffix
         else:
-            url = "http://{}/{}".format(self._base_url, suffix)
+            url = "{}/{}".format(self._base_url, suffix)
 
         headers = {}
         if auth_user is not None:
@@ -154,25 +220,24 @@ class CaClient:
 
         try:
             if data is not None:
-                result = requests.post(url, headers=headers, data=data)
+                result = requests.post(url, headers=headers, data=data, timeout=timeout)
             else:
-                result = requests.get(url, headers=headers)
-
-            if result.status_code == 404:
-                raise XoException("No such game: {}".format(name))
-
-            elif not result.ok:
-                raise XoException("Error {}: {}".format(
-                    result.status_code, result.reason))
-
+                result = requests.get(url, headers=headers, timeout=timeout)
         except requests.ConnectionError as err:
-            raise XoException(
+            raise CaException(
                 'Failed to connect to {}: {}'.format(url, str(err)))
+        except requests.RequestException as err:
+            raise CaException('Request to {} failed: {}'.format(url, str(err)))
 
-        except BaseException as err:
-            raise XoException(err)
+        if result.status_code == 404:
+            if not_found_ok:
+                return None
+            raise CaException("Not found: {}".format(url))
+        if not result.ok:
+            raise CaException("Error {}: {}".format(
+                result.status_code, _error_message(result)))
 
-        return result.text
+        return result
 
     def _send_ca_txn(self,
                      action,
@@ -180,127 +245,71 @@ class CaClient:
                      wait=None,
                      auth_user=None,
                      auth_password=None):
-        # Serialization is just a delimited utf-8 encoded string
-        payload = "|".join([action, datetime.datetime.utcnow().isoformat(), str(value)]).encode('utf-8')
+        serial = new_serial()
+        transaction = self._create_transaction(
+            FAMILY_NAME, make_payload(action, value), get_prefix(), nonce=serial)
+        status = self._submit([transaction], wait, auth_user, auth_password)
+        return serial, status
 
-        # Construct the address
-        address = self._get_prefix()
+    def _create_transaction(self, family_name, payload, address, nonce):
+        if self._signer is None:
+            raise CaException('A private key is required to send transactions')
+
         header = TransactionHeader(
-            signer_public_key=self._signer.get_public_key().as_hex(),
-            family_name="CA",
-            family_version="1.0",
+            signer_public_key=self.public_key,
+            family_name=family_name,
+            family_version=FAMILY_VERSION,
             inputs=[address],
             outputs=[address],
             dependencies=[],
             payload_sha512=_sha512(payload),
-            batcher_public_key=self._signer.get_public_key().as_hex(),
-            nonce=hex(random.randint(0, 2**64))
+            batcher_public_key=self.public_key,
+            nonce=hex(nonce)
         ).SerializeToString()
 
-        signature = self._signer.sign(header)
-
-        transaction = Transaction(
+        return Transaction(
             header=header,
             payload=payload,
-            header_signature=signature
+            header_signature=self._signer.sign(header)
         )
 
-        batch_list = self._create_batch_list([transaction])
+    def _submit(self, transactions, wait, auth_user, auth_password):
+        """Submit a batch and, if wait > 0, wait up to wait seconds for it to commit.
+
+        Returns:
+            str: batch status ('COMMITTED', 'PENDING', ...), or 'SUBMITTED'
+            when not waiting.
+        Raises:
+            CaException: if the batch is rejected as invalid.
+        """
+        batch_list = self._create_batch_list(transactions)
         batch_id = batch_list.batches[0].header_signature
 
-        if wait and wait > 0:
-            wait_time = 0
-            start_time = time.time()
-            response = self._send_request(
-                "batches", batch_list.SerializeToString(),
-                'application/octet-stream',
-                auth_user=auth_user,
-                auth_password=auth_password)
-            while wait_time < wait:
-                status = self._get_status(
-                    batch_id,
-                    wait - int(wait_time),
-                    auth_user=auth_user,
-                    auth_password=auth_password)
-                wait_time = time.time() - start_time
-
-                if status != 'PENDING':
-                    return response
-
-            return response
-
-        return self._send_request(
+        self._send_request(
             "batches", batch_list.SerializeToString(),
             'application/octet-stream',
             auth_user=auth_user,
             auth_password=auth_password)
 
-    def _send_simple_txn(self,
-                         value="",
-                         wait=None,
-                         auth_user=None,
-                         auth_password=None):
-        # Serialization is just a delimited utf-8 encoded string
-        payload = str(value).encode()
+        if not wait or wait <= 0:
+            return 'SUBMITTED'
 
-        # Construct the address
-        address = self._get_simple_address('Simple Data Value 1')
-
-        header = TransactionHeader(
-            signer_public_key=self._signer.get_public_key().as_hex(),
-            family_name='SIMPLE',
-            family_version="1.0",
-            inputs=[address],
-            outputs=[address],
-            dependencies=[],
-            payload_sha512=_sha512(payload),
-            batcher_public_key=self._signer.get_public_key().as_hex(),
-            nonce=hex(random.randint(0, 2**64))
-        ).SerializeToString()
-
-        signature = self._signer.sign(header)
-
-        transaction = Transaction(
-            header=header,
-            payload=payload,
-            header_signature=signature
-        )
-
-        batch_list = self._create_batch_list([transaction])
-        batch_id = batch_list.batches[0].header_signature
-
-        if wait and wait > 0:
-            wait_time = 0
-            start_time = time.time()
-            response = self._send_request(
-                "batches", batch_list.SerializeToString(),
-                'application/octet-stream',
-                auth_user=auth_user,
-                auth_password=auth_password)
-            while wait_time < wait:
-                status = self._get_status(
-                    batch_id,
-                    wait - int(wait_time),
-                    auth_user=auth_user,
-                    auth_password=auth_password)
-                wait_time = time.time() - start_time
-
-                if status != 'PENDING':
-                    return response
-
-            return response
-
-        return self._send_request(
-            "batches", batch_list.SerializeToString(),
-            'application/octet-stream',
-            auth_user=auth_user,
-            auth_password=auth_password)
+        deadline = time.time() + wait
+        while True:
+            remaining = max(1, int(deadline - time.time()))
+            batch_status = self._get_status(batch_id, remaining, auth_user, auth_password)
+            status = batch_status['status']
+            if status == 'INVALID':
+                messages = [t.get('message', '') for t in batch_status.get('invalid_transactions', [])]
+                raise CaException('Transaction rejected: {}'.format('; '.join(messages) or 'unknown reason'))
+            if status != 'PENDING' or time.time() >= deadline:
+                return status
 
     def _create_batch_list(self, transactions):
         transaction_signatures = [t.header_signature for t in transactions]
 
         header = BatchHeader(
-            signer_public_key=self._signer.get_public_key().as_hex(),
+            signer_public_key=self.public_key,
             transaction_ids=transaction_signatures
         ).SerializeToString()
 
@@ -312,103 +321,15 @@ class CaClient:
             header_signature=signature)
         return BatchList(batches=[batch])
 
-    def subscribe(self, event_name: str, is_write_to_file=False, file_name='certificate.pem'):
-        subscription = EventSubscription(event_type="ca_1/{}".format(event_name))
 
-        # Setup a connection to the validator
-        ctx = zmq.Context()
-        socket = ctx.socket(zmq.DEALER)
-        socket.connect('tcp://127.0.0.1:4004')
+def get_simple_address(data):
+    prefix = _sha512('simple'.encode('utf-8'))[:6]
+    address = _sha512(data.encode('utf-8'))[:64]
+    return prefix + address
 
-        # Construct the request
-        request = ClientEventsSubscribeRequest(
-            subscriptions=[subscription]).SerializeToString()
 
-        # Construct the message wrapper
-        correlation_id = "123"  # This must be unique for all in-process requests
-        msg = Message(
-            correlation_id=correlation_id,
-            message_type=Message.CLIENT_EVENTS_SUBSCRIBE_REQUEST,
-            content=request)
-
-        # Send the request
-        socket.send_multipart([msg.SerializeToString()])
-
-        # Receive the response
-        resp = socket.recv_multipart()[-1]
-
-        # Parse the message wrapper
-        msg = Message()
-        msg.ParseFromString(resp)
-
-        # Validate the response type
-        if msg.message_type != Message.CLIENT_EVENTS_SUBSCRIBE_RESPONSE:
-            print("Unexpected message type")
-            return
-
-        # Parse the response
-        response = ClientEventsSubscribeResponse()
-        response.ParseFromString(msg.content)
-
-        # Validate the response status
-        if response.status != ClientEventsSubscribeResponse.OK:
-            print("Subscription failed: {}".format(response.response_message))
-            return
-
-        resp = socket.recv_multipart()[-1]
-
-        # Parse the message wrapper
-        msg = Message()
-        msg.ParseFromString(resp)
-
-        # Validate the response type
-        if msg.message_type != Message.CLIENT_EVENTS:
-            print("Unexpected message type")
-            return
-
-        # Parse the response
-        events = EventList()
-        events.ParseFromString(msg.content)
-
-        for event in events.events:
-            if event.data is not None:
-                if is_write_to_file:
-                    write_to_file(file_name, event.data)
-                else:
-                    print(event.data)
-
-        # Construct the request
-        request = ClientEventsUnsubscribeRequest().SerializeToString()
-
-        # Construct the message wrapper
-        correlation_id = "124"  # This must be unique for all in-process requests
-        msg = Message(
-            correlation_id=correlation_id,
-            message_type=Message.CLIENT_EVENTS_UNSUBSCRIBE_REQUEST,
-            content=request)
-
-        # Send the request
-        socket.send_multipart([msg.SerializeToString()])
-
-        # Receive the response
-        resp = socket.recv_multipart()[-1]
-
-        # Parse the message wrapper
-        msg = Message()
-        msg.ParseFromString(resp)
-
-        # Validate the response type
-        if msg.message_type != Message.CLIENT_EVENTS_UNSUBSCRIBE_RESPONSE:
-            print("Unexpected message type")
-
-        # Parse the response
-        response = ClientEventsUnsubscribeResponse()
-        response.ParseFromString(msg.content)
-
-        # Validate the response status
-        if response.status != ClientEventsUnsubscribeResponse.OK:
-            print("Unsubscription failed: {}".format(response.response_message))
-
-        # Close the connection to the validator
-        socket.close()
-
+def _error_message(response):
+    try:
+        return response.json()['error']['message']
+    except (ValueError, KeyError, TypeError):
+        return response.reason

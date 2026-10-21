@@ -19,8 +19,8 @@ def _generate_docker_compose(node_template, i):
             .replace(TEMPLATE_NODE_ID, str(i)) \
             .replace(TEMPLATE_NODE_NETWORK_NAME, docker_compose_directory)
 
-        base, ext = node_template.split('.')
-        node_file_name = base + '-' + str(i) + '.' + ext
+        base, ext = os.path.splitext(node_template)
+        node_file_name = '{}-{}{}'.format(base, i, ext)
 
         with open(node_file_name, 'w+') as node_file:
             node_file.write(node_file_content)

@@ -7,16 +7,14 @@ import logging
 import sys
 import time
 import urllib.request
-from _sha512 import sha512
-from os import path
 from random import uniform, randint
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 from sawtooth_sdk.protobuf.batch_pb2 import BatchHeader, Batch, BatchList
 from sawtooth_sdk.protobuf.transaction_pb2 import TransactionHeader, Transaction
 from sawtooth_signing import create_context, CryptoFactory
 
-from lib.common import AbstractClient, DEFAULT_MONITORING_FOLDER, init_logger
+from lib.common import AbstractClient, init_logger, monitoring_file_path
 
 LOGGER = logging.getLogger(__name__)
 
@@ -73,7 +71,7 @@ class SawtoothClient(AbstractClient):
         date = datetime.date.today()
         logging_file_name = '{}-{}-benchmark-requests.csv'.format(str(date), benchmark)
 
-        self._tx_state_log_file = path.join(DEFAULT_MONITORING_FOLDER, logging_file_name)
+        self._tx_state_log_file = monitoring_file_path(logging_file_name)
 
     def generate_load(self):
         init_tx = {
@@ -127,7 +125,7 @@ class SawtoothClient(AbstractClient):
             nonce=str(randint(0, 10000000000)),
             signer_public_key=self._signer.get_public_key().as_hex(),
             batcher_public_key=self._signer.get_public_key().as_hex(),
-            payload_sha512=sha512(payload_bytes).hexdigest()
+            payload_sha512=hashlib.sha512(payload_bytes).hexdigest()
         ).SerializeToString()
 
         signature = self._signer.sign(txn_header_bytes)
@@ -169,6 +167,9 @@ class SawtoothClient(AbstractClient):
         except HTTPError as e:
             LOGGER.debug('Could not send a request')
             status = e.code
+        except URLError as e:
+            LOGGER.error('Could not reach the REST API: {}'.format(e.reason))
+            status = 'unreachable'
         return status
 
 
