@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- CLI `list`, `status`, `get`, `ca-cert` and `verify` commands. They read global
+  state through the REST API, so they no longer send a transaction or need
+  access to the validator's ZMQ port.
+- `verify` checks a certificate file against the on-chain CA root and record
+  (signature, ledger copy, revocation, expiry) and exits with status 1 on failure.
+- `create` saves the generated private key (`cert_<serial>.key`, mode 600,
+  optionally encrypted with `--encrypt-key`) and accepts subject options
+  (`--country`, `--state`, `--locality`, `--org`, `--org-unit`, `--email`).
+- Certificate ownership: the transaction processor records the requester's
+  public key, and only the owner or the CA admin (the `init` signer) may revoke.
+- Certificates report `Expired` once their validity has passed.
+- X.509 extensions: BasicConstraints, KeyUsage, Subject/Authority Key Identifier.
+- Python test suite in `tests/` (`python -m pytest tests`).
+
+### Changed
+- Issued certificates are valid for 365 days (was 1 minute); the CA root for
+  3650 days (was 10 days).
+- `create`/`revoke`/`init` wait for the commit by default (`--wait 60`) and
+  report the validator's reason when a transaction is rejected.
+- `init` fails if the CA is already initialized instead of silently doing nothing.
+- `create` writes `cert_<serial>.pem` instead of `certificate.pem`.
+- Event attribute `serial` is now decimal, matching the certificate and state key.
+- `main.py` defaults now produce valid URLs (`localhost` instead of `tcp://...`).
+
+### Removed
+- Leftover tic-tac-toe (XO) CLI commands and the `sawtooth_xo` dependency.
+- `pathlib` backport from requirements.txt.
+
+### Fixed
+- `create` always failed after the pickle-to-JSON change: PEM bytes are not JSON serializable.
+- Certificate expiry timestamps depended on the validator's time zone, which
+  could make validators compute different state.
+- Transaction processor used f-strings, which the container's Python 3.5 cannot parse.
+- `get`, `status` and `revoke` of an unknown serial failed with an AttributeError.
+- CLI subscribed to events after submitting, so it could miss the event and hang.
+- CLI ignored `--key-dir`; HTTP requests had no timeout.
+- `main.py` crashed on start: restored the deleted `docker_monitor.py` and
+  replaced the non-existent `SawtoothClient.subscribe()` with `SawtoothSubscriber`.
+- `sawtooth_client.py` imported the private `_sha512` module, removed in Python 3.12.
+- `docker_starter.py` crashed on template paths containing extra dots.
+- Monitoring CSVs failed when the `logs/` folder did not exist.
+
 ## [2.0.0] - 2026-08-17
 
 ### Security

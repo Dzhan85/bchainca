@@ -1,4 +1,5 @@
 import logging
+import os
 from abc import ABC, abstractmethod
 
 DEFAULT_MONITORING_FOLDER = 'logs'
@@ -34,6 +35,12 @@ class AbstractClient(ABC):
     @abstractmethod
     def start_load(self):
         pass
+
+
+def monitoring_file_path(file_name):
+    """Path of a file in the monitoring folder, creating the folder if needed."""
+    os.makedirs(DEFAULT_MONITORING_FOLDER, exist_ok=True)
+    return os.path.join(DEFAULT_MONITORING_FOLDER, file_name)
 
 
 def init_logger(level):

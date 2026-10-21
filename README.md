@@ -148,6 +148,38 @@ python sawtooth_client.py \
   --verbose
 ```
 
+### Certificate Authority CLI
+
+`bchainca-cli/cli.py` issues, revokes and verifies X.509 certificates on the
+ledger. Commands that change state are signed with a Sawtooth key
+(`~/.sawtooth/keys/<username>.priv` by default, see `--username` / `--key-dir`)
+and wait for the transaction to commit (`--wait`, default 60s). Read-only
+commands only need the REST API (`--url`, default `http://127.0.0.1:8008`).
+
+```bash
+cd bchainca-cli
+
+# One-time: create the CA root certificate. The signer becomes the CA admin.
+python cli.py init --username admin
+
+# Request a certificate. Saves cert_<serial>.pem and cert_<serial>.key (mode 600).
+python cli.py create alice@example.com --org-unit Research --out-dir ./certs
+python cli.py create web01 --country DE --org ACME --encrypt-key
+
+python cli.py list                          # all certificates
+python cli.py status <serial>               # Valid / Revoked / Expired, owner, dates
+python cli.py get <serial> -o alice.pem     # download a certificate
+python cli.py ca-cert -o ca.pem             # download the CA root certificate
+python cli.py verify ./certs/cert_<serial>.pem   # exit code 1 if not trustworthy
+
+# Only the certificate owner (the key that requested it) or the CA admin may revoke.
+python cli.py revoke <serial>
+```
+
+`verify` checks that the certificate is signed by the on-chain CA root,
+is byte-identical to the copy on the ledger, and is neither revoked nor
+expired. Issued certificates are valid for 365 days, the CA root for 10 years.
+
 ### Frontend Development
 
 ```bash
@@ -186,12 +218,13 @@ docker-compose -f docker-compose-node.yaml up -d
 | Argument | Description | Default |
 |----------|-------------|---------|
 | `--node_count` | Number of nodes in the network | 4 |
-| `--node_template` | Docker compose template for standard nodes | tcp://localhost:4004 |
+| `--node_template` | Docker compose template for standard nodes | docker-compose-node.yaml |
 | `--boot_node` | Docker compose file for boot node | None |
-| `--publisher_url` | URL with port of the Publisher | tcp://localhost:4004 |
-| `--server_node_url` | URL with port of the Server node | tcp://localhost:8008 |
+| `--publisher_url` | Host of the validator to subscribe to events on (port 4004) | localhost |
+| `--server_node_url` | Host of the REST API to send transactions to (port 8008) | localhost |
 | `--load` | Number of transactions sent to the network | 0 |
 | `--benchmark` | Name of the benchmark to run | do-nothing |
+| `--event_timeout` | Seconds to wait for all events after sending the load | 60 |
 | `-v, --verbose` | Increase output verbosity | 0 |
 
 ## Project Structure
@@ -203,6 +236,8 @@ bchainca/
 │   ├── cli.py              # CLI entry point
 │   ├── client.py           # Client implementation
 │   └── CaException.py      # Custom exceptions
+├── docker/bchainca-tp/      # CA transaction processor (runs in the validator network)
+├── tests/                   # Python tests (pytest)
 ├── lib/                     # Shared libraries
 │   ├── common.py           # Common utilities
 │   └── __init__.py
@@ -213,6 +248,7 @@ bchainca/
 ├── sawtooth_client.py      # Sawtooth blockchain client
 ├── sawtooth_subscriber.py  # Event subscriber
 ├── docker_starter.py       # Docker orchestration
+├── docker_monitor.py       # Container CPU / memory monitoring
 ├── requirements.txt        # Python dependencies
 ├── package.json           # Node.js dependencies
 └── Dockerfile             # Container build configuration
@@ -229,8 +265,10 @@ Transaction logs are automatically saved to timestamped CSV files in the monitor
 ### Running Tests
 
 ```bash
-# Python tests (if available)
-python -m pytest
+# Python tests: CA transaction processor, CLI and benchmark tooling.
+# They run without the Sawtooth SDK installed (it is stubbed when missing).
+pip install cryptography requests requests-unixsocket colorlog python-dateutil pytest
+python -m pytest tests
 
 # Angular tests
 npm test

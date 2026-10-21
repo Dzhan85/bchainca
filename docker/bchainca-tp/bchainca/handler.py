@@ -35,47 +35,38 @@ class CAHandler(TransactionHandler):
             state = CaState(context=context, namespace=self._namespace_prefix, timeout=2)
             # state.check_CA_cert()
             payload = CaPayload(payload=transaction.payload)
+            nonce = int(header.nonce, 0)
 
             if payload.action == 'init':
-                state.init_CA_cert(date=payload.date, nonce=int(header.nonce, 0), spkey=payload.value)
+                state.init_CA_cert(date=payload.date, nonce=nonce, spkey=payload.value, admin=signer)
             elif payload.action == 'create':
-                cert_bytes = state.create_certificate(date=payload.date, nonce=int(header.nonce, 0), csr=payload.value)
-                event_name = "{}/create".format(self._namespace_prefix)
-                LOGGER.debug("fire event " + event_name)
-                context.add_event(event_name,
-                                  {"serial": "{}".format(header.nonce)}.items(),
-                                  cert_bytes)
-                LOGGER.debug("event {} fired".format(event_name))
-                # context.add_receipt_data(cert_bytes)
+                cert_bytes = state.create_certificate(date=payload.date, nonce=nonce, csr=payload.value,
+                                                      owner=signer)
+                self._fire_event(context, 'create', nonce, cert_bytes)
             elif payload.action == 'get':
                 cert_bytes = state.get_certificate(payload.serial)
-                event_name = "{}/get".format(self._namespace_prefix)
-                LOGGER.debug("fire event " + event_name)
-                context.add_event(event_name,
-                                  {"serial": "{}".format(payload.serial)}.items(),
-                                  cert_bytes)
-                LOGGER.debug("event {} fired".format(event_name))
+                self._fire_event(context, 'get', payload.serial, cert_bytes)
             elif payload.action == 'revoke':
-                state.revoke_certificate(payload.serial)
-                event_name = "{}/revoke".format(self._namespace_prefix)
-                LOGGER.debug("fire event " + event_name)
-                context.add_event(event_name,
-                                  {"serial": "{}".format(payload.serial)}.items())
-                LOGGER.debug("event {} fired".format(event_name))
+                state.revoke_certificate(payload.serial, signer=signer, date=payload.date)
+                self._fire_event(context, 'revoke', payload.serial)
             elif payload.action == 'status':
-                status = state.check_status(payload.serial)
-                event_name = "{}/status".format(self._namespace_prefix)
-                LOGGER.debug("fire event " + event_name)
-                context.add_event(event_name,
-                                  {"serial": "{}".format(payload.serial)}.items(),
-                                  status.encode('utf-8'))
-                LOGGER.debug("event {} fired".format(event_name))
+                status = state.check_status(payload.serial, date=payload.date)
+                self._fire_event(context, 'status', payload.serial, status.encode('utf-8'))
             else:
                 raise InvalidTransaction("Transaction payload type unknown.")
+        except InvalidTransaction:
+            raise
         except InternalError as er:
             raise InvalidTransaction(str(er)) from er
-        except BaseException as ex:
+        except Exception as ex:
             raise InvalidTransaction(str(ex)) from ex
+
+    def _fire_event(self, context, action, serial, data=b''):
+        event_name = "{}/{}".format(self._namespace_prefix, action)
+        LOGGER.debug("fire event " + event_name)
+        # The serial is always sent in decimal, matching the state key and
+        # the serial number embedded in the certificate.
+        context.add_event(event_name, [("serial", str(serial))], data)
 
 
 def _display(msg):
